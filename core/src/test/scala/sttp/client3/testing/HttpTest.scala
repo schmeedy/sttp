@@ -1,16 +1,16 @@
 package sttp.client3.testing
 
-import java.io.{ByteArrayInputStream, UnsupportedEncodingException}
-import java.nio.ByteBuffer
-
 import org.scalatest._
 import org.scalatest.freespec.AsyncFreeSpecLike
 import org.scalatest.matchers.should.Matchers
+import sttp.client3.internal.{Iso88591, Utf8}
 import sttp.client3.testing.HttpTest.endpoint
 import sttp.client3.{Response, ResponseAs, SttpBackend, _}
 import sttp.model.StatusCode
 import sttp.monad.MonadError
 
+import java.io.{ByteArrayInputStream, UnsupportedEncodingException}
+import java.nio.ByteBuffer
 import scala.concurrent.Future
 import scala.concurrent.duration._
 
@@ -48,6 +48,7 @@ trait HttpTest[F[_]]
   protected def supportsSttpExceptions = true
   protected def supportsMultipart = true
   protected def supportsCustomMultipartContentType = true
+  protected def supportsCustomMultipartEncoding = true
   protected def supportsCustomContentEncoding = false
   protected def throwsExceptionOnUnsupportedEncoding = true
   protected def supportsHostHeaderOverride = true
@@ -406,6 +407,30 @@ trait HttpTest[F[_]]
         req.send(backend).toFuture().map { resp =>
           resp.body should include("f1")
           resp.body should include("v1")
+        }
+      }
+
+      if (supportsCustomMultipartEncoding) {
+        "send a multipart message containing body parts with explicitly set encodings" in {
+
+          val utf8Char = "\u00f6" //ö
+          //used as replacement for every char that cannot be decoded properly
+          val replacementChar = "\ufffd" //�
+
+          val req = basicRequest
+            .post(uri"$endpoint/multipart/content_type")
+            .response(asStringAlways)
+            .multipartBody(
+              multipart("p1", utf8Char, Utf8),
+              multipart("p2", utf8Char, Iso88591)
+            )
+
+          req.send(backend).toFuture().map { resp =>
+            resp.body should be(
+              //utf8Char cannot be properly decoded using ISO-8859-1 so replacementChar is returned
+              s"p1=$utf8Char$defaultFileName content-type: text/plain; charset=UTF-8, p2=$replacementChar$defaultFileName content-type: text/plain; charset=ISO-8859-1"
+            )
+          }
         }
       }
 
